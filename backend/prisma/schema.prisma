@@ -1,0 +1,205 @@
+// This is your Prisma schema file
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  exchanges      ExchangeConnection[]
+  trades         Trade[]
+  journals       DailyJournal[]
+  riskRules      RiskRules?
+  psychologyLogs PsychologyLog[]
+  goals          Goal[]
+
+  @@map("users")
+}
+
+model ExchangeConnection {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exchange     String   // "binance", "bybit", "okx", etc.
+  label        String?  // "Основной аккаунт"
+  apiKeyEncrypted    String
+  apiSecretEncrypted String
+  isActive     Boolean  @default(true)
+  lastSyncAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  trades Trade[]
+
+  @@map("exchange_connections")
+}
+
+model Trade {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exchangeId   String?
+  exchange     ExchangeConnection? @relation(fields: [exchangeId], references: [id])
+
+  // Trade data from exchange
+  exchangeTradeId String?   // ID on the exchange
+  symbol          String    // "BTCUSDT"
+  side            String    // "LONG" | "SHORT"
+  type            String?   // "FUTURES" | "SPOT"
+  
+  entryPrice  Float
+  exitPrice   Float?
+  quantity    Float
+  leverage    Int       @default(1)
+  
+  stopLoss    Float?
+  takeProfit  Float?
+  
+  pnl         Float?    // Realized PnL in USDT
+  pnlPercent  Float?    // PnL as % of position
+  commission  Float?    // Total commission paid
+  
+  openTime    DateTime
+  closeTime   DateTime?
+  duration    Int?      // seconds
+  
+  status      String    @default("closed") // "open" | "closed"
+
+  // Manual annotations
+  setupTags   String[]  // ["breakout", "retest", "knife", "density", "scalp"]
+  whyEntered  String?   // "Почему вошёл?"
+  whatWentWrong String? // "Что пошло не так?"
+  whatWentRight String? // "Что сделал правильно?"
+  notes       String?   // Свободный комментарий
+  
+  emotionBefore Int?   // 1-10 перед входом
+  emotionAfter  Int?   // 1-10 после выхода
+  
+  screenshot  String?  // URL/path к скриншоту
+
+  // Entry points for chart visualization
+  entryPoints  TradePoint[]
+
+  ruleViolations String[] // ["removed_stop", "overleveraged", "revenge_trade"]
+
+  isAnnotated Boolean @default(false) // true когда заполнен комментарий
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("trades")
+}
+
+model TradePoint {
+  id       String @id @default(uuid())
+  tradeId  String
+  trade    Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  
+  type     String  // "entry" | "exit" | "add" | "reduce" | "stop" | "target"
+  price    Float
+  quantity Float?
+  time     DateTime
+  note     String?
+
+  @@map("trade_points")
+}
+
+model DailyJournal {
+  id     String   @id @default(uuid())
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date   DateTime @db.Date
+
+  // Pre-trading check-in
+  moodScore        Int?    // 1-10
+  sleptWell        Boolean?
+  pressureToEarn   Boolean?
+  shouldTrade      Boolean? // система рекомендует или нет
+  
+  // Post-trading
+  dailyPnl        Float?
+  tradesCount     Int?
+  winCount        Int?
+  
+  morningNotes    String?  // план на день
+  eveningNotes    String?  // итоги дня
+  lessonsLearned  String?  // что узнал
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@map("daily_journals")
+}
+
+model RiskRules {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  maxDailyLossPercent Float   @default(5)   // % от депозита
+  maxDailyLossUsd     Float?                // фиксированный $
+  maxTradesPerDay     Int     @default(4)
+  maxLeverage         Int     @default(10)
+  requireStopLoss     Boolean @default(true)
+  maxConsecutiveLosses Int    @default(3)
+  
+  // Сессии (часы торговли)
+  tradingHoursStart Int?  // 9 = 09:00
+  tradingHoursEnd   Int?  // 17 = 17:00
+
+  // Мотивационные напоминания
+  motivationalMessages String[]
+
+  updatedAt DateTime @updatedAt
+
+  @@map("risk_rules")
+}
+
+model Goal {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title     String             // Название цели
+  period    String             // "day" | "month" | "quarter" | "halfyear" | "year" | "custom"
+  targetType String            // "pnl" | "pnl_percent" | "winrate" | "trades" | "custom"
+  targetValue Float?           // Целевое числовое значение
+  depositAmount Float?         // Для pnl_percent — размер депозита в $
+  customNote String?           // Для type=custom — описание
+  unit      String?            // "$", "%", "сделок"
+
+  startDate DateTime?
+  endDate   DateTime?
+
+  isCompleted   Boolean  @default(false)
+  completedAt   DateTime?
+  notified      Boolean  @default(false)  // уведомление уже отправили?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("goals")
+}
+
+model PsychologyLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime @default(now())
+  
+  eventType String  // "daily_limit_hit" | "rule_violation" | "streak_warning" | "checkin"
+  message   String
+  data      Json?
+
+  @@map("psychology_logs")
+}
