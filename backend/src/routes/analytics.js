@@ -289,4 +289,129 @@ router.get('/streak', async (req, res) => {
   }
 });
 
+// GET /api/analytics/drawdown — max drawdown + Sharpe ratio
+router.get('/drawdown', async (req, res) => {
+  try {
+    const trades = await prisma.trade.findMany({
+      where: { userId: req.user.id, status: 'closed' },
+      orderBy: { closeTime: 'asc' },
+      select: { pnl: true, commission: true, closeTime: true }
+    });
+
+    const netPnls = trades.map(t => (t.pnl || 0) - (t.commission || 0));
+
+    // Max Drawdown
+    let peak = 0, cumulative = 0, maxDrawdown = 0, maxDrawdownPct = 0;
+    let drawdownStart = null, drawdownEnd = null, peakTime = null;
+    for (let i = 0; i < netPnls.length; i++) {
+      cumulative += netPnls[i];
+      if (cumulative > peak) {
+        peak = cumulative;
+        peakTime = trades[i].closeTime;
+      }
+      const dd = peak - cumulative;
+      if (dd > maxDrawdown) {
+        maxDrawdown = dd;
+        maxDrawdownPct = peak > 0 ? (dd / peak) * 100 : 0;
+        drawdownEnd = trades[i].closeTime;
+        drawdownStart = peakTime;
+      }
+    }
+
+    // Sharpe Ratio (simplified, risk-free rate = 0)
+    const n = netPnls.length;
+    const mean = n > 0 ? netPnls.reduce((s, p) => s + p, 0) / n : 0;
+    const variance = n > 1 ? netPnls.reduce((s, p) => s + Math.pow(p - mean, 2), 0) / (n - 1) : 0;
+    const stdDev = Math.sqrt(variance);
+    const sharpe = stdDev > 0 ? (mean / stdDev) * Math.sqrt(252) : null; // annualized
+
+    // Recovery factor
+    const totalPnl = netPnls.reduce((s, p) => s + p, 0);
+    const recoveryFactor = maxDrawdown > 0 ? totalPnl / maxDrawdown : null;
+
+    res.json({
+      maxDrawdown: Math.round(maxDrawdown * 100) / 100,
+      maxDrawdownPct: Math.round(maxDrawdownPct * 100) / 100,
+      sharpeRatio: sharpe ? Math.round(sharpe * 100) / 100 : null,
+      recoveryFactor: recoveryFactor ? Math.round(recoveryFactor * 100) / 100 : null,
+      drawdownStart,
+      drawdownEnd,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка drawdown' });
+  }
+});
+
+// GET /api/analytics/by-weekday — PnL by day of week
+router.get('/by-weekday', async (req, res) => {
+  try {
+    const trades = await prisma.trade.findMany({
+      where: { userId: req.user.id, status: 'closed' },
+      select: { openTime: true, pnl: true, commission: true }
+    });
+
+    const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    const byDay = Array.from({ length: 7 }, (_, i) => ({ day: days[i], dayNum: i, pnl: 0, count: 0, wins: 0 }));
+
+    for (const t of trades) {
+      const net = (t.pnl || 0) - (t.commission || 0);
+      const dow = new Date(t.openTime).getDay();
+      byDay[dow].pnl += net;
+      byDay[dow].count++;
+      if (net > 0) byDay[dow].wins++;
+    }
+
+    // Reorder: Mon-Fri-Sat-Sun (Mon first)
+    const ordered = [byDay[1], byDay[2], byDay[3], byDay[4], byDay[5], byDay[6], byDay[0]];
+
+    res.json(ordered.map(d => ({
+      ...d,
+      pnl: Math.round(d.pnl * 100) / 100,
+      winRate: d.count > 0 ? Math.round((d.wins / d.count) * 100) : 0
+    })));
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка аналитики по дням' });
+  }
+});
+
+// GET /api/analytics/by-leverage — PnL grouped by leverage ranges
+router.get('/by-leverage', async (req, res) => {
+  try {
+    const trades = await prisma.trade.findMany({
+      where: { userId: req.user.id, status: 'closed' },
+      select: { leverage: true, pnl: true, commission: true }
+    });
+
+    const buckets = {
+      'x1-x5': { label: 'x1–x5', pnl: 0, count: 0, wins: 0 },
+      'x6-x10': { label: 'x6–x10', pnl: 0, count: 0, wins: 0 },
+      'x11-x20': { label: 'x11–x20', pnl: 0, count: 0, wins: 0 },
+      'x21-x50': { label: 'x21–x50', pnl: 0, count: 0, wins: 0 },
+      'x50+': { label: 'x50+', pnl: 0, count: 0, wins: 0 },
+    };
+
+    for (const t of trades) {
+      const net = (t.pnl || 0) - (t.commission || 0);
+      const lev = t.leverage || 1;
+      let key;
+      if (lev <= 5) key = 'x1-x5';
+      else if (lev <= 10) key = 'x6-x10';
+      else if (lev <= 20) key = 'x11-x20';
+      else if (lev <= 50) key = 'x21-x50';
+      else key = 'x50+';
+      buckets[key].pnl += net;
+      buckets[key].count++;
+      if (net > 0) buckets[key].wins++;
+    }
+
+    res.json(Object.values(buckets).map(b => ({
+      ...b,
+      pnl: Math.round(b.pnl * 100) / 100,
+      winRate: b.count > 0 ? Math.round((b.wins / b.count) * 100) : 0
+    })));
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка аналитики по плечу' });
+  }
+});
+
 module.exports = router;

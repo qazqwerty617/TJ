@@ -28,6 +28,9 @@ export default function AnalyticsPage() {
   const [byHour, setByHour] = useState<any[]>([]);
   const [calendar, setCalendar] = useState<any[]>([]);
   const [monthly, setMonthly] = useState<any[]>([]);
+  const [drawdown, setDrawdown] = useState<any>(null);
+  const [byWeekday, setByWeekday] = useState<any[]>([]);
+  const [byLeverage, setByLeverage] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activePreset, setActivePreset] = useState(0);
   const [dateFrom, setDateFrom] = useState('');
@@ -44,7 +47,7 @@ export default function AnalyticsPage() {
       if (to) params.set('to', to);
       const q = params.toString() ? `?${params.toString()}` : '';
 
-      const [ov, eq, sym, tag, hour, cal, mon] = await Promise.all([
+      const [ov, eq, sym, tag, hour, cal, mon, dd, wd, lev] = await Promise.all([
         api.get(`/api/analytics/overview${q}`),
         api.get(`/api/analytics/equity${q}`),
         api.get('/api/analytics/by-symbol'),
@@ -52,6 +55,9 @@ export default function AnalyticsPage() {
         api.get('/api/analytics/by-hour'),
         api.get(`/api/analytics/calendar?year=${calYear}`),
         api.get('/api/analytics/monthly'),
+        api.get('/api/analytics/drawdown'),
+        api.get('/api/analytics/by-weekday'),
+        api.get('/api/analytics/by-leverage'),
       ]);
       setOverview(ov.data);
       setEquity(eq.data);
@@ -60,6 +66,9 @@ export default function AnalyticsPage() {
       setByHour(hour.data);
       setCalendar(cal.data);
       setMonthly(mon.data);
+      setDrawdown(dd.data);
+      setByWeekday(wd.data);
+      setByLeverage(lev.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -168,7 +177,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* ═══ OVERVIEW STATS ═══ */}
-        <div className="stats-grid" style={{ marginBottom: 24 }}>
+        <div className="stats-grid" style={{ marginBottom: 16 }}>
           {[
             { label: 'Всего сделок', value: overview?.totalTrades || 0, color: 'neutral', sub: `${overview?.wins || 0} прибыльных` },
             { label: 'Win Rate', value: `${overview?.winRate || 0}%`, color: 'neutral', sub: `${overview?.losses || 0} убыточных` },
@@ -186,6 +195,36 @@ export default function AnalyticsPage() {
             </div>
           ))}
         </div>
+
+        {/* ═══ RISK METRICS ROW ═══ */}
+        {drawdown && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+            <div className="stat-card red">
+              <div className="stat-label">📉 Max Drawdown</div>
+              <div className="stat-value negative" style={{ fontSize: 20 }}>-{drawdown.maxDrawdown.toFixed(2)}$</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{drawdown.maxDrawdownPct.toFixed(1)}% от пика</div>
+            </div>
+            <div className="stat-card blue">
+              <div className="stat-label">📐 Sharpe Ratio</div>
+              <div className={`stat-value ${drawdown.sharpeRatio > 1 ? 'positive' : drawdown.sharpeRatio > 0 ? 'neutral' : 'negative'}`} style={{ fontSize: 20 }}>
+                {drawdown.sharpeRatio ?? '—'}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{drawdown.sharpeRatio > 1 ? '✅ Хороший' : drawdown.sharpeRatio > 0 ? '⚠️ Слабый' : '❌ Плохой'}</div>
+            </div>
+            <div className="stat-card green">
+              <div className="stat-label">🔄 Recovery Factor</div>
+              <div className={`stat-value ${(drawdown.recoveryFactor || 0) > 0 ? 'positive' : 'negative'}`} style={{ fontSize: 20 }}>
+                {drawdown.recoveryFactor?.toFixed(2) ?? '—'}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>PnL / MaxDD</div>
+            </div>
+            <div className="stat-card yellow">
+              <div className="stat-label">💸 Комиссии итого</div>
+              <div className="stat-value negative" style={{ fontSize: 20 }}>-{(overview?.totalCommission || 0).toFixed(2)}$</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{overview?.totalTrades || 0} закрытых сделок</div>
+            </div>
+          </div>
+        )}
 
         {/* ═══ EQUITY CURVE ═══ */}
         <div className="chart-container" style={{ marginBottom: 20 }}>
@@ -343,6 +382,66 @@ export default function AnalyticsPage() {
             </ResponsiveContainer>
           </div>
         )}
+
+        {/* ═══ BY WEEKDAY + BY LEVERAGE ═══ */}
+        <div className="grid-2" style={{ gap: 20, marginBottom: 20 }}>
+          <div className="chart-container">
+            <div className="chart-header">
+              <span className="chart-title">P&L по дням недели</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>В какой день торгуешь лучше?</span>
+            </div>
+            {byWeekday.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: 13 }}>Нет данных</div>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={byWeekday} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
+                  <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'rgba(255,255,255,0.4)' }} />
+                  <YAxis tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)' }} />
+                  <Tooltip content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0].payload;
+                    if (d.count === 0) return null;
+                    return (
+                      <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px' }}>
+                        <div style={{ fontWeight: 700 }}>{d.day}</div>
+                        <div style={{ color: d.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{d.pnl >= 0 ? '+' : ''}{d.pnl.toFixed(2)} $</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{d.count} сд · WR {d.winRate}%</div>
+                      </div>
+                    );
+                  }} />
+                  <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
+                    {byWeekday.map((e, i) => <Cell key={i} fill={e.count === 0 ? 'rgba(255,255,255,0.05)' : e.pnl >= 0 ? '#00D4AA' : '#FF4757'} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          <div className="chart-container">
+            <div className="chart-header">
+              <span className="chart-title">P&L по размеру плеча</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Какое плечо тебе подходит?</span>
+            </div>
+            {byLeverage.every(b => b.count === 0) ? (
+              <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: 13 }}>Нет данных</div>
+            ) : (
+              <div style={{ padding: '8px 0' }}>
+                {byLeverage.filter(b => b.count > 0).map(b => (
+                  <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, minWidth: 55, color: 'var(--text-secondary)' }}>{b.label}</span>
+                    <div style={{ flex: 1, height: 6, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', borderRadius: 3, background: b.pnl >= 0 ? 'var(--green)' : 'var(--red)', width: `${Math.min(100, Math.abs(b.pnl) / Math.max(...byLeverage.map((x: any) => Math.abs(x.pnl) || 0.001)) * 100)}%` }} />
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: b.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'monospace', minWidth: 65, textAlign: 'right' }}>{b.pnl >= 0 ? '+' : ''}{b.pnl.toFixed(2)}$</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 40, textAlign: 'right' }}>{b.winRate}%</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 30 }}>{b.count}шт</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* ═══ YEARLY CALENDAR HEATMAP ═══ */}
         <div className="card" style={{ marginBottom: 20 }}>

@@ -29,6 +29,7 @@ export default function DashboardPage() {
   const [calendarData, setCalendarData] = useState<any[]>([]);
   const [balance, setBalance] = useState<any>(null);
   const [streak, setStreak] = useState<any>(null);
+  const [drawdown, setDrawdown] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
 
@@ -37,7 +38,7 @@ export default function DashboardPage() {
   const loadData = async () => {
     try {
       const year = new Date().getFullYear();
-      const [statsRes, equityRes, tradesRes, psychRes, symRes, monRes, unannotRes, calendarRes, streakRes] = await Promise.all([
+      const [statsRes, equityRes, tradesRes, psychRes, symRes, monRes, unannotRes, calendarRes, streakRes, ddRes] = await Promise.all([
         api.get('/api/analytics/overview'),
         api.get('/api/analytics/equity'),
         api.get('/api/trades?limit=8&sortBy=openTime&sortOrder=desc'),
@@ -47,6 +48,7 @@ export default function DashboardPage() {
         api.get('/api/trades?annotated=false&status=closed&limit=1'),
         api.get(`/api/analytics/calendar?year=${year}`),
         api.get('/api/analytics/streak'),
+        api.get('/api/analytics/drawdown'),
       ]);
       setStats(statsRes.data);
       setEquity(equityRes.data.slice(-80));
@@ -57,6 +59,7 @@ export default function DashboardPage() {
       setUnannotated(unannotRes.data.pagination?.total || 0);
       setCalendarData(calendarRes.data);
       setStreak(streakRes.data);
+      setDrawdown(ddRes.data);
 
       // Try to load exchange balance (non-critical)
       api.get('/api/exchanges').then(async (exRes) => {
@@ -224,7 +227,7 @@ export default function DashboardPage() {
             <div className="stat-label">Win Rate</div>
             <div className="stat-value neutral" style={{ fontSize: 26 }}>{stats?.winRate ?? 0}%</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-              {stats?.wins} ✅ / {stats?.losses} ❌
+              Коэф. Шарпа: {drawdown?.sharpeRatio ?? '—'}
             </div>
           </div>
 
@@ -236,7 +239,7 @@ export default function DashboardPage() {
             <div className="stat-label">Profit Factor</div>
             <div className="stat-value neutral" style={{ fontSize: 26 }}>{stats?.profitFactor ?? '—'}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-              R:R = {stats?.rrRatio ?? '—'}
+              Просадка: -{drawdown?.maxDrawdown?.toFixed(1) ?? 0}$
             </div>
           </div>
 

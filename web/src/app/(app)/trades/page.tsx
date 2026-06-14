@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
-import { Filter, Plus, RefreshCw, TrendingUp, TrendingDown, X, ChevronRight } from 'lucide-react';
+import { Filter, Plus, RefreshCw, TrendingUp, TrendingDown, X, ChevronRight, Download } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
@@ -58,6 +58,40 @@ export default function TradesPage() {
   const loadTrades = () => setRefreshTrigger(p => p + 1);
   const pnlColor = (pnl: number) => (pnl >= 0 ? 'var(--green)' : 'var(--red)');
 
+  const exportCSV = async () => {
+    try {
+      const params = new URLSearchParams({ limit: '10000', sortBy: 'openTime', sortOrder: 'desc' });
+      if (filters.symbol) params.append('symbol', filters.symbol);
+      if (filters.side) params.append('side', filters.side);
+      if (filters.status) params.append('status', filters.status);
+      const res = await api.get(`/api/trades?${params}`);
+      const allTrades = res.data.trades;
+      const headers = ['Дата', 'Пара', 'Направление', 'Плечо', 'Вход', 'Выход', 'Объём', 'P&L', 'P&L%', 'Комиссия', 'Сетапы', 'Разобрана'];
+      const rows = allTrades.map((t: any) => [
+        format(new Date(t.openTime), 'dd.MM.yyyy HH:mm'),
+        t.symbol, t.side, `x${t.leverage}`,
+        t.entryPrice?.toFixed(4) ?? '',
+        t.exitPrice?.toFixed(4) ?? '',
+        t.quantity ?? '',
+        (t.pnl ?? '').toString(),
+        (t.pnlPercent ?? '').toString(),
+        (t.commission ?? '').toString(),
+        (t.setupTags || []).join(';'),
+        t.isAnnotated ? 'Да' : 'Нет',
+      ]);
+      const csv = [headers, ...rows].map(r => r.map((v: string) => `"${v}"`).join(',')).join('\n');
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `trades_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('CSV export error', e);
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -68,6 +102,9 @@ export default function TradesPage() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn btn-secondary btn-sm" onClick={() => setShowFilters(!showFilters)}>
             <Filter size={13} /> Фильтры
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={exportCSV} title="Экспорт в CSV">
+            <Download size={13} /> CSV
           </button>
           <button className="btn btn-secondary btn-sm" onClick={loadTrades}>
             <RefreshCw size={13} className={loading ? 'spin' : ''} />
