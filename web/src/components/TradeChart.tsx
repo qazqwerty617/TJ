@@ -118,6 +118,7 @@ export default function TradeChart({
   const [interval, setIntervalVal] = useState('5m');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const pnlPositive = (pnl ?? 0) >= 0;
 
@@ -129,13 +130,50 @@ export default function TradeChart({
   const addPoints = entryPoints.filter(p => p.type === 'add');
   const reducePoints = entryPoints.filter(p => p.type === 'reduce');
 
+  // Toggle fullscreen mode
+  const toggleFullscreen = () => {
+    setIsFullscreen(p => !p);
+  };
+
+  // Handle keypress Escape to close fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
+
+  // Handle Resize and Dimensions of Chart
+  useEffect(() => {
+    if (!chartRef.current || !containerRef.current) return;
+
+    const updateSize = () => {
+      if (!chartRef.current || !containerRef.current) return;
+      const width = containerRef.current.clientWidth;
+      const height = isFullscreen ? window.innerHeight - 150 : 420;
+      chartRef.current.applyOptions({ width, height });
+    };
+
+    // Delay slightly to allow the DOM overlay class toggle to settle
+    const t = setTimeout(updateSize, 30);
+    window.addEventListener('resize', updateSize);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('resize', updateSize);
+    };
+  }, [isFullscreen]);
+
   useEffect(() => {
     if (!containerRef.current) return;
 
     // 1. Build Chart
+    const initialHeight = isFullscreen ? window.innerHeight - 150 : 420;
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: 420,
+      height: initialHeight,
       layout: { background: { type: ColorType.Solid, color: '#0D0D18' }, textColor: 'rgba(255,255,255,0.45)', fontSize: 11, fontFamily: 'Inter, monospace' },
       grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
       crosshair: { mode: 1, vertLine: { color: 'rgba(255,255,255,0.25)', width: 1, style: 3 }, horzLine: { color: 'rgba(255,255,255,0.25)', width: 1, style: 3 } },
@@ -224,10 +262,40 @@ export default function TradeChart({
       try { chart.remove(); } catch (e) {}
       if (chartRef.current === chart) { chartRef.current = null; candleRef.current = null; }
     };
-  }, [symbol, interval, entryPrice, exitPrice, stopLoss, takeProfit, side, openTime, closeTime, pnlPositive, avgPrice, hasAvgEntry, JSON.stringify(entryPoints)]);
+  }, [symbol, interval, entryPrice, exitPrice, stopLoss, takeProfit, side, openTime, closeTime, pnlPositive, avgPrice, hasAvgEntry, JSON.stringify(entryPoints), isFullscreen]);
+
+  // Fullscreen styling
+  const wrapperStyle: React.CSSProperties = isFullscreen ? {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 99999,
+    background: '#0D0D18',
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100vw',
+    height: '100vh',
+    padding: '12px',
+    boxSizing: 'border-box',
+  } : {
+    background: '#0D0D18',
+    borderRadius: 12,
+    overflow: 'hidden',
+    border: '1px solid rgba(255,255,255,0.07)',
+    position: 'relative',
+  };
 
   return (
-    <div style={{ background: '#0D0D18', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.07)' }}>
+    <div style={wrapperStyle}>
+      {/* CSS to hide TradingView Logo / attribution inside lightweight-charts */}
+      <style dangerouslySetInnerHTML={{__html: `
+        #tv-attr-logo, 
+        .tv-attr-logo, 
+        div[class^="tv-"] a, 
+        a[href*="tradingview.com"] {
+          display: none !important;
+        }
+      `}} />
+
       {/* ─── Header ─── */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -272,23 +340,41 @@ export default function TradeChart({
           )}
         </div>
 
-        {/* Right: interval selector */}
-        <div style={{ display: 'flex', gap: 4 }}>
-          {INTERVALS.map(({ label, value }) => (
-            <button
-              key={value}
-              onClick={() => setIntervalVal(value)}
-              style={{
-                padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                background: interval === value ? '#00D4AA' : 'rgba(255,255,255,0.06)',
-                color: interval === value ? '#000' : 'rgba(255,255,255,0.55)',
-                border: interval === value ? 'none' : '1px solid rgba(255,255,255,0.1)',
-                transition: 'all 0.15s',
-              }}
-            >
-              {label}
-            </button>
-          ))}
+        {/* Right: Fullscreen + interval selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {INTERVALS.map(({ label, value }) => (
+              <button
+                key={value}
+                onClick={() => setIntervalVal(value)}
+                style={{
+                  padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  background: interval === value ? '#00D4AA' : 'rgba(255,255,255,0.06)',
+                  color: interval === value ? '#000' : 'rgba(255,255,255,0.55)',
+                  border: interval === value ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={toggleFullscreen}
+            style={{
+              padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              background: isFullscreen ? '#FF4757' : 'rgba(255,255,255,0.08)',
+              color: '#fff',
+              border: '1px solid rgba(255,255,255,0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              transition: 'all 0.15s',
+            }}
+          >
+            {isFullscreen ? '✕ Закрыть' : '⛶ Во весь экран'}
+          </button>
         </div>
       </div>
 
@@ -331,7 +417,7 @@ export default function TradeChart({
         {takeProfit && <span style={{ color: 'rgba(0,212,170,0.65)' }}>— TP: {takeProfit}</span>}
 
         <span style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.2)', fontSize: 10 }}>
-          Binance Futures · 600 свечей
+          Личный терминальный график
         </span>
       </div>
 
@@ -392,7 +478,66 @@ export default function TradeChart({
       )}
 
       {/* ─── Chart canvas ─── */}
-      <div style={{ position: 'relative' }}>
+      <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column' }}>
+        
+        {/* CENTER PNL & PERCENT OVERLAY (AS REQUESTED) */}
+        {(pnl != null || pnlPercent != null) && (
+          <div style={{
+            position: 'absolute',
+            top: 15,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 20,
+            background: 'rgba(17, 17, 33, 0.9)',
+            border: `1px solid ${pnlPositive ? 'rgba(0, 212, 170, 0.3)' : 'rgba(255, 71, 87, 0.3)'}`,
+            padding: '8px 20px',
+            borderRadius: 30,
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+            backdropFilter: 'blur(10px)',
+            pointerEvents: 'none',
+            fontFamily: 'monospace',
+          }}>
+            {pnl != null && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.5px' }}>PNL</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: pnlPositive ? '#00D4AA' : '#FF4757' }}>
+                  {pnlPositive ? '+' : ''}{pnl.toFixed(2)} $
+                </span>
+              </div>
+            )}
+            {pnlPercent != null && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', borderLeft: '1px solid rgba(255,255,255,0.15)', paddingLeft: 16 }}>
+                <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.5px' }}>PNL %</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: pnlPositive ? '#00D4AA' : '#FF4757' }}>
+                  {pnlPositive ? '+' : ''}{pnlPercent.toFixed(2)}%
+                </span>
+              </div>
+            )}
+            {exitPrice && entryPrice && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', borderLeft: '1px solid rgba(255,255,255,0.15)', paddingLeft: 16 }}>
+                <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.5px' }}>ДВИЖЕНИЕ</span>
+                <span style={{
+                  fontSize: 14, fontWeight: 800,
+                  color: (() => {
+                    const base = hasAvgEntry ? avgPrice : entryPrice;
+                    const pct = ((exitPrice - base) / base) * (side === 'LONG' ? 1 : -1);
+                    return pct >= 0 ? '#00D4AA' : '#FF4757';
+                  })()
+                }}>
+                  {(() => {
+                    const base = hasAvgEntry ? avgPrice : entryPrice;
+                    const pct = ((exitPrice - base) / base * 100) * (side === 'LONG' ? 1 : -1);
+                    return `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+                  })()}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
         {loading && (
           <div style={{
             position: 'absolute', inset: 0, zIndex: 10,
@@ -417,7 +562,7 @@ export default function TradeChart({
             <span style={{ fontSize: 13, color: 'rgba(255,71,87,0.9)', maxWidth: 320 }}>{error}</span>
           </div>
         )}
-        <div ref={containerRef} />
+        <div ref={containerRef} style={{ flex: 1 }} />
       </div>
     </div>
   );
